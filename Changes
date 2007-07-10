@@ -1,0 +1,6 @@
+Revision history for Perl extension Mail::Postini.
+
+0.01  Tue Jun 26 16:46:03 2007
+	- original version; created by h2xs 1.23 with options
+		-AX -b 5.8.1 Mail::Postini
+

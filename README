@@ -1,0 +1,33 @@
+Mail-Postini version 0.07
+=========================
+
+Mail::Postini makes LWP (web or http) requests to a Postini
+application server, allowing you to create and delete organizations,
+domains, and users, among other things.
+
+INSTALLATION
+
+To install this module type the following:
+
+   perl Makefile.PL
+   make
+   make test
+   make install
+
+DEPENDENCIES
+
+This module requires these other modules and libraries:
+
+  LWP::UserAgent
+  Crypt::SSLeay (or other crypto module that will let LWP connect via https)
+  HTML::Form
+  URI::Escape
+  Digest::SHA1
+
+COPYRIGHT AND LICENCE
+
+Copyright (C) 2007 by Scott Wiersdorf
+
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself, either Perl version 5.8.6 or,
+at your option, any later version of Perl 5 you may have available.
