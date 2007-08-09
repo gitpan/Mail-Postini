@@ -4,8 +4,8 @@ use 5.008001;
 use strict;
 use warnings;
 
-our $VERSION = '0.07';
-our $CVSID   = '$Id: Postini.pm,v 1.2 2007/07/10 22:25:20 scott Exp $';
+our $VERSION = '0.08';
+our $CVSID   = '$Id: Postini.pm,v 1.3 2007/08/09 23:33:15 scott Exp $';
 our $Debug   = 0;
 
 use LWP::UserAgent ();
@@ -177,58 +177,10 @@ sub get_user_data {
     my $self = shift;
     my $user = shift;
 
-    ## get the users list w/ settings
-    my $req = HTTP::Request->new( GET => qq!$app_serv{$self}/exec/admin_listusers_download?aliases=0&type_of_user=all&pagesize=25&type_of_encrypted_user=ext_encrypt_on&sortkeys=address%3Aa&pagenum=1&targetorgid=$orgid{$self}&childorgs=1&type=usersets! );
-    my $res = $ua{$self}->request($req);
-
-    my @keys  = ();
-    my %users = ();
-
-  LINES: for my $line ( split(/\n/, $res->content) ) {
-
-        ## find the keys
-        if( $line =~ /^\#/ ) {
-            next unless $line =~ /address/;
-            next if @keys;
-
-            $line =~ s/^#\s*//;
-            @keys = split(/,/, $line);
-            next;
-        }
-
-        next LINES unless @keys;
-
-        if( $user ) {
-            next LINES unless $line =~/^$user,/;
-        }
-
-        my @fields = ();
-        my $state = 0;
-        CHUNK: for my $chunk ( split(/,/, $line) ) {
-
-            if( $state == 1 ) {
-                if( $chunk =~ s/"$// ) {
-                    $state = 0;
-                }
-
-                $fields[$#fields] .= ',' . $chunk;
-                next CHUNK;
-            }
-
-            if( $chunk =~ s/^"// ) {
-                $state = 1;
-            }
-
-            push @fields, $chunk;
-        }
-
-
-        my %acct = ();
-        @acct{@keys} = @fields;
-        $users{$acct{$keys[0]}} = \%acct;
-    }
-
-    return %users;
+    my %args = ();
+    $args{user} = $user if $user;
+    my $users = $self->list_users( %args );
+    return ($users ? %$users : ());
 }
 
 sub get_orgid {
@@ -297,6 +249,66 @@ sub delete_domain {
     return 1;
 }
 
+sub list_users {
+    my $self = shift;
+    my %args = @_;
+
+    my $qs = qq!$app_serv{$self}/exec/admin_listusers_download?aliases=0&type_of_user=all&pagesize=25&type_of_encrypted_user=ext_encrypt_on&sortkeys=address%3Aa&pagenum=1&targetorgid=$orgid{$self}&childorgs=1&type=usersets!;
+    $qs .= "&addressqs=$args{domain}%24" if $args{domain};
+
+    my $req = HTTP::Request->new( GET => $qs );
+    my $res = $ua{$self}->request($req);
+
+    my @keys  = ();
+    my %users = ();
+
+  LINES: for my $line ( split(/\n/, $res->content) ) {
+
+        ## find the keys
+        if( $line =~ /^\#/ ) {
+            next unless $line =~ /address/;
+            next if @keys;
+
+            $line =~ s/^#\s*//;
+            @keys = split(/,/, $line);
+            next;
+        }
+
+        next LINES unless @keys;
+
+        if( $args{user} ) {
+            next LINES unless $line =~/^$args{user},/;
+        }
+
+        my @fields = ();
+        my $state = 0;
+        CHUNK: for my $chunk ( split(/,/, $line) ) {
+
+            if( $state == 1 ) {
+                if( $chunk =~ s/"$// ) {
+                    $state = 0;
+                }
+
+                $fields[$#fields] .= ',' . $chunk;
+                next CHUNK;
+            }
+
+            if( $chunk =~ s/^"// ) {
+                $state = 1;
+            }
+
+            push @fields, $chunk;
+        }
+
+
+        my %acct = ();
+        @acct{@keys} = @fields;
+        $users{$acct{$keys[0]}} = \%acct;
+    }
+
+    return \%users;
+}
+
 sub add_user {
     my $self = shift;
     return $self->_do_command('adduser', @_);
@@ -310,16 +322,25 @@ sub delete_user {
 sub _do_command {
     my $self = shift;
     my $cmd  = shift;
-    my $args = shift;
+    my $addr = shift;
+    my %args = @_;
 
     my $radd = chr(rand(26) + 0x41) . chr(rand(26) + 0x41) . 
       chr(rand(26) + 0x41) . chr(rand(26) + 0x41) . $username{$self};
 
     my $sig = sha1_base64( $radd . $secret{$self} ) . $radd;
 
-    $args = uri_escape($args);
+    $addr = uri_escape($addr);
 
-    my $req = HTTP::Request->new( GET => qq!$app_serv{$self}/exec/remotecmd?auth=${sig}&cmd=${cmd}%20${args}! );
+    my @args = ();
+    for my $key ( keys %args ) {
+        push @args, uri_escape($key) . '=' . uri_escape($args{$key});
+    }
+    my $args = join('&', @args) || '';
+
+    my $auth = qq!$app_serv{$self}/exec/remotecmd?auth=${sig}&cmd=${cmd}%20${addr}! . ( $args ? '&' . $args : '' );
+    print STDERR "Sending command: $auth\n" if $Debug;
+    my $req = HTTP::Request->new( GET => $auth );
     my $res = LWP::UserAgent->new->request($req);
 
     unless( $res->content =~ /^1\s/ ) {
@@ -524,6 +545,17 @@ Example:
 
   $mp->delete_organization( org => 'Old Sub-Org' );
 
+=head2 list_users ( %criteria )
+
+Returns a hashref in the form of 'username => user data' for all users
+that match the given criteria. Currently only 'user' and 'domain'
+criteria are supported.
+
+Example:
+
+  ## retrieve all users for this domain
+  my $users = $mp->list_users( domain => 'saltpatio.com' );
+
 =head2 get_user_data ( $username )
 
 Retrieves the current settings for a user in the form of a hash.
@@ -531,6 +563,10 @@ Retrieves the current settings for a user in the form of a hash.
 Example:
 
   my %data = $mp->get_user_data('joe@domain.tld');
+
+B<get_user_data> is a shortcut for:
+
+  my %data = %{ $mp->list_users( user => 'joe@domain.tld' ) };
 
 =head2 get_orgid ( name => $organization_name )
 
@@ -556,7 +592,7 @@ deleted from the domain first.
 
   $mp->delete_domain( domain => 'somedomain.tld' );
 
-=head2 add_user ( $username )
+=head2 add_user ( $username, [ field => value, ... ] )
 
 Adds an email address to a Postini domain. When the user is added,
 Postini will filter mail for it. The domain must be added to an
