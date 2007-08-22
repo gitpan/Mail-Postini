@@ -1,5 +1,12 @@
 Revision history for Perl extension Mail::Postini.
 
+Release 0.9:
+----------------------------
+revision 1.4
+date: 2007/08/15 03:54:55;  author: scott;  state: Exp;  lines: +260 -21
+- set/get_org_mail_server() methods: used to set the smtp delivery server
+- updated docs
+
 Release 0.8:
 ----------------------------
 revision 1.3

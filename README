@@ -1,4 +1,4 @@
-Mail-Postini version 0.08
+Mail-Postini version 0.11
 =========================
 
 Mail::Postini makes LWP (web or http) requests to a Postini

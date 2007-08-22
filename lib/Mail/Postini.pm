@@ -4,9 +4,10 @@ use 5.008001;
 use strict;
 use warnings;
 
-our $VERSION = '0.08';
-our $CVSID   = '$Id: Postini.pm,v 1.3 2007/08/09 23:33:15 scott Exp $';
+our $VERSION = '0.11';
+our $CVSID   = '$Id: Postini.pm,v 1.6 2007/08/22 17:25:19 scott Exp $';
 our $Debug   = 0;
+our $Trace   = 0;
 
 use LWP::UserAgent ();
 use URI::Escape 'uri_escape';
@@ -116,11 +117,20 @@ sub create_organization {
     my $self = shift;
     my %args = @_;
 
+    my $parentorgid;
+    unless( $parentorgid = $args{parentorgid} ) {
+        $parentorgid = $self->get_orgid($args{parentorg})
+          if $args{parentorg};
+        $parentorgid ||= $orgid{$self};  ## top level org
+    }
+    print STDERR "Parent orgid: $parentorgid\n" if $Debug;
+
     my $org = $args{org};
-    my $req = HTTP::Request->new( GET => qq!$app_serv{$self}/exec/admin_orgs?targetorgid=$orgid{$self}! );
+    my $req = HTTP::Request->new( GET => qq!$app_serv{$self}/exec/admin_orgs?targetorgid=$parentorgid! );
     my $res = $ua{$self}->request($req);
 
-    my $form = $self->_get_form($res, qr(/exec/admin_orgs\?targetorgid=$orgid{$self}$),
+    print STDERR "call _get_form in create_organization()\n" if $Trace;
+    my $form = $self->_get_form($res, qr(/exec/admin_orgs\?targetorgid=${parentorgid}$),
                                 { type  => 'submit',
                                   value => 'Add',
                                   name  => '', } )
@@ -129,42 +139,226 @@ sub create_organization {
           return;
       };
 
+    print STDERR "setting form variables\n" if $Trace;
     $form->value( "setconf-neworg" => $org );
-    $form->value( "setconf-parent" => $orgname{$self} );
-    $form->value( "action"         => "addOrg" );
+    $form->value( "setconf-parent" => $parentorgid );
+    $form->value( "action" => "addOrg" );
     $res = $ua{$self}->request( $form->click() );
 
-    unless( $res->code == 302 ) {
+    unless( $res->is_redirect ) {
         $self->errors("Failure: " . $res->code . ": " . $res->message);
         $self->err_pages($res);
         return;
     }
 
-    my($new_org) = $res->content =~ /\btargetorgid=(\d+)"/;
+    print STDERR "Form submission ok\n" if $Trace;
+    my($new_org) = $res->content =~ /\btargetorgid=(\d+)"/
+      or return;
 
+    ## https://ac-s7.postini.com/exec/admin_orgs?targetorgid=100059067&action=display_GeneralSettings
+    $req = HTTP::Request->new( GET => qq!$app_serv{$self}/exec/admin_orgs?targetorgid=${new_org}&action=display_GeneralSettings! );
+    $res = $ua{$self}->request($req);
+
+    ## this trick might be useful sometime in the future. It certainly
+    ## makes the redirect more change-tolerant
+#    $res = $self->_do_redirect($app_serv{$self} . $res->header('location'));
+
+    print STDERR "call _get_form to set org details\n" if $Trace;
+    my $setform = $self->_get_form($res, qr(\badmin_orgs\b), { type  => 'text',
+                                                               name  => 'setconf-name', })
+      or do {
+          carp "Form error: " . join(', ', $self->errors());
+          return;
+      };
+
+    $setform->value('setconf-name'            => $args{name})            if $args{name};
+    $setform->value('setconf-is_email_config' => $args{email_config})    if $args{email_config};
+    $setform->value('setconf-support_contact' => $args{support_contact}) if $args{support_contact};
+    $setform->value('setconf-api_secret'      => $args{api_secret})      if $args{api_secret};
+
+    $res = $ua{$self}->request( $setform->click() );
+
+    unless( $res->is_redirect ) {
+        $self->errors("Failure: " . $res->code . ": " . $res->message);
+        $self->err_pages($res);
+        return;
+    }
+
+    print STDERR "Successful organization creation ($new_org)\n" if $Trace;
     return ( $new_org ? $new_org : undef );
+}
+
+sub set_org_mail_server {
+    my $self = shift;
+    my %args = @_;
+
+    unless( $args{orgid} ) {
+        unless( $args{org} ) {
+            $self->errors("Failure: orgid or org parameter required for set_org_mail_server()");
+            return;
+        }
+
+        $args{orgid} = $self->get_orgid($args{org})
+          or do {
+              $self->errors("Failure: Could not get orgid for '$args{org}' (misspelled org name, or Postini down?)");
+              return;
+          };
+    }
+
+    my $orgid = $args{orgid};
+
+    ## param check
+    unless( $args{server1} ) {
+        $self->errors("Failure: server1 parameter required for set_org_mail_server()");
+        return;
+    }
+    $args{weight1} ||= 100;
+    $args{maxcon1} ||= '';
+
+    my $req = HTTP::Request->new( GET => qq!$app_serv{$self}/exec/delivmgr?targetorgid=${orgid}&action=display_Edit!);
+    my $res = $ua{$self}->request($req);
+
+    my $form = $self->_get_form($res, qr(\b/exec/delivmgr\b))
+      or do {
+          carp "Form error: " . join(", ", $self->errors());
+          return;
+      };
+
+    $form->value("action"       => 'modifyDeliv');
+    $form->value("targetorgid"  => $orgid);
+    $form->value("mailhost-0|0" => $args{server1});
+    $form->value("weight-0|0"   => $args{weight1});
+    $form->value("maxcon-0|0"   => $args{maxcon1});
+
+    if( $args{server2} ) {
+        $args{weight2} ||= 50;
+        $args{maxcon2} ||= '';
+
+        $form->value("mailhost-0|1" => $args{server2});
+        $form->value("weight-0|1"   => $args{weight2});
+        $form->value("maxcon-0|1"   => $args{maxcon2});
+    }
+
+    if( $args{failover1} ) {
+        $args{fo_weight1} ||= 50;
+        $args{fo_maxcon1} ||= '';
+
+        $form->value("mailhost-1|0" => $args{failover1});
+        $form->value("weight-1|0"   => $args{fo_weight1});
+        $form->value("maxcon-1|0"   => $args{fo_maxcon1});
+    }
+
+    if( $args{failover2} ) {
+        $args{fo_weight2} ||= 25;
+        $args{fo_maxcon2} ||= '';
+
+        $form->value("mailhost-1|1" => $args{failover2});
+        $form->value("weight-1|1"   => $args{fo_weight2});
+        $form->value("maxcon-1|1"   => $args{fo_maxcon2});
+    }
+
+    if( $args{failover3} ) {
+        $args{fo_weight3} ||= 25;
+        $args{fo_maxcon3} ||= '';
+
+        $form->value("mailhost-1|2" => $args{failover3});
+        $form->value("weight-1|2"   => $args{fo_weight3});
+        $form->value("maxcon-1|2"   => $args{fo_maxcon3});
+    }
+
+    $form->value("overflow" => 1) if $args{overflow};
+
+    $res = $ua{$self}->request( $form->click() );
+
+    unless( $res->is_redirect ) {
+        $self->errors("Failure: " . $res->code . ": " . $res->message);
+        $self->err_pages($res);
+        return;
+    }
+
+    return 1;
+}
+
+sub get_org_mail_server {
+    my $self = shift;
+    my %args = @_;
+
+    unless( $args{orgid} ) {
+        unless( $args{org} ) {
+            $self->errors("Failure: orgid or org parameter required for get_org_mail_server()");
+            return;
+        }
+
+        $args{orgid} = $self->get_orgid($args{org})
+          or do {
+              $self->errors("Failure: Could not get orgid for '$args{org}' (misspelled org name or Postini down?)");
+              return;
+          };
+    }
+
+    my $orgid = $args{orgid};
+    my $req = HTTP::Request->new( GET => qq!$app_serv{$self}/exec/delivmgr?targetorgid=$orgid&action=display_Edit! );
+    my $res = $ua{$self}->request($req);
+
+    my $form = $self->_get_form($res, qr(\bdelivmgr\b), { type => 'hidden',
+                                                          name => 'action',
+                                                          value => 'modifyDeliv' })
+      or do {
+          warn "Could not find form.\n";
+          $self->err_pages($res);
+          return;
+      };
+
+    my %data = ();
+    $data{server1} = $form->value('mailhost-0|0');
+    $data{weight1} = $form->value('weight-0|0');
+    $data{maxcon1} = $form->value('maxcon-0|0');
+
+    $data{server2} = $form->value('mailhost-0|1');
+    $data{weight2} = $form->value('weight-0|1');
+    $data{maxcon2} = $form->value('maxcon-0|1');
+
+    $data{failover1}  = $form->value('mailhost-1;0');
+    $data{fo_weight1} = $form->value('weight-1;0');
+    $data{fo_maxcon1} = $form->value('maxcon-1;0');
+
+    $data{failover2}  = $form->value('mailhost-1;1');
+    $data{fo_weight2} = $form->value('weight-1;1');
+    $data{fo_maxcon2} = $form->value('maxcon-1;1');
+
+    $data{failover3}  = $form->value('mailhost-1;2');
+    $data{fo_weight3} = $form->value('weight-1;2');
+    $data{fo_maxcon3} = $form->value('maxcon-1;2');
+
+    return %data;
 }
 
 sub delete_organization {
     my $self = shift;
     my %args = @_;
-    my $org = $args{org}
-      or do {
-          warn "Organization name required.\n";
-          return;
-      };
 
     my $req;
     my $res;
 
-    my $orgid = $self->get_orgid( name => $org );
+    unless( $args{orgid} ) {
+        unless( $args{org} ) {
+            $self->errors("orgid or org parameter required for delete_organization()");
+            return;
+        }
 
-    $req = HTTP::Request->new( POST => qq!$app_serv{$self}/exec/admin_orgs?targetorgid=$orgid! );
+        $args{orgid} = $self->get_orgid( name => $args{org} )
+          or do {
+              $self->errors("Could not fetch orgid from '$args{org}'");
+              return;
+          };
+    }
+
+    $req = HTTP::Request->new( POST => qq!$app_serv{$self}/exec/admin_orgs?targetorgid=$args{orgid}! );
     $req->content_type( 'application/x-www-form-urlencoded' );
     $req->content( "confirm=Confirm&action=deleteOrg" );
     $res = $ua{$self}->request($req);
 
-    unless( $res->code == 302 ) {
+    unless( $res->is_redirect ) {
         $self->errors("Failure: " . $res->code . ": " . $res->message);
         $self->err_pages($res);
         return;
@@ -177,8 +371,12 @@ sub get_user_data {
     my $self = shift;
     my $user = shift;
 
+    my($domain) = $user =~ /\@(.+)$/
+      if $user;
+
     my %args = ();
-    $args{user} = $user if $user;
+    $args{user}   = $user if $user;
+    $args{domain} = $domain if $domain;
     my $users = $self->list_users( %args );
     return ($users ? %$users : ());
 }
@@ -203,11 +401,23 @@ sub add_domain {
     my $self = shift;
     my %args = @_;
 
-    my $orgid   = $self->get_orgid( name => $args{org} );
+    unless( $args{orgid} ) {
+        unless( $args{org} ) {
+            $self->errors("orgid or org parameter required for delete_organization()");
+            return;
+        }
+
+        $args{orgid} = $self->get_orgid( name => $args{org} )
+          or do {
+              $self->errors("Could not fetch orgid from '$args{org}'");
+              return;
+          };
+    }
+
     my $orgname = $args{org};
     my $domain  = $args{domain};
 
-    my $req = HTTP::Request->new( GET => qq!$app_serv{$self}/exec/admin_domains?action=display_Add&targetorgid=$orgid! );
+    my $req = HTTP::Request->new( GET => qq!$app_serv{$self}/exec/admin_domains?action=display_Add&targetorgid=$args{orgid}! );
     my $res = $ua{$self}->request($req);
 
     my $form = $self->_get_form($res, qr(/exec/admin_domains))
@@ -249,11 +459,55 @@ sub delete_domain {
     return 1;
 }
 
+sub org_from_domain {
+    my $self = shift;
+    my $domain = shift;
+
+    my $qs = qq!$app_serv{$self}/exec/admin_list?type=domains&childorgs=0&domainqs=${domain}&childorgs=1&Search=Search!;
+    my $req = HTTP::Request->new( GET => $qs );
+    my $res = $ua{$self}->request($req);
+
+    my ($chunk) = $res->content =~ m#<!-- START DOMAIN ROW -->\n(.+)\n<!-- END DOMAIN ROW -->#s;
+    return unless $chunk;
+
+    my ($orgid) = $chunk =~ m!$domain.+?</td>\n<td\b.+/admin_orgs\?action=display_Overview&targetorgid=(\d+)!;
+    return unless $orgid;
+
+    return $orgid;
+}
+
 sub list_users {
     my $self = shift;
     my %args = @_;
 
-    my $qs = qq!$app_serv{$self}/exec/admin_listusers_download?aliases=0&type_of_user=all&pagesize=25&type_of_encrypted_user=ext_encrypt_on&sortkeys=address%3Aa&pagenum=1&targetorgid=$orgid{$self}&childorgs=1&type=usersets!;
+  GET_ORGID: {
+        last GET_ORGID if $args{orgid};
+
+        ## no org given...
+        unless( $args{org} ) {
+
+            ## but we have a domain we can search on
+            if( $args{domain} ) {
+                if( $args{orgid} = $self->org_from_domain($args{domain}) ) {
+                    last GET_ORGID;
+                }
+
+                ## bite the bullet and suck up the memory...
+                $args{orgid} = $orgid{$self};
+                last GET_ORGID;
+            }
+
+            $self->errors("Failure: domain, orgid, or org parameter required for list_users()");
+            return;
+        }
+
+        last GET_ORGID if $args{orgid} = $self->get_orgid($args{org});
+
+        $self->errors("Failure: Could not get orgid for '$args{org}' (misspelled org name or Postini down?)");
+        return;
+    }
+
+    my $qs = qq!$app_serv{$self}/exec/admin_listusers_download?aliases=0&type_of_user=all&pagesize=25&type_of_encrypted_user=ext_encrypt_on&sortkeys=address%3Aa&pagenum=1&targetorgid=$args{orgid}&childorgs=1&type=usersets!;
     $qs .= "&addressqs=$args{domain}%24" if $args{domain};
 
     my $req = HTTP::Request->new( GET => $qs );
@@ -411,6 +665,14 @@ sub _get_form {
 
     my @forms = HTML::Form->parse( $res->content, $res->base );
     my $form;
+
+    print STDERR "Done parsing form\n" if $Trace;
+    unless( scalar(@forms) ) {
+        $self->errors("No forms found!");
+        $self->err_pages($res);
+        return;
+    }
+
   FORMS: for my $frm ( @forms ) {
         print STDERR "Comparing form action...\n" if $Debug;
 	unless( $frm->action =~ $action ) {
@@ -418,12 +680,15 @@ sub _get_form {
             next FORMS;
         }
 
+        print STDERR "Got a match form action match...\n" if $Debug;
+
         ## we have more criteria to weed out the form we want
         if( keys %$inputs ) {
             my $input_match;
 
+            print STDERR "Refining form search because inputs detected...\n" if $Debug;
           FORM_INPUT: for my $finput ( $frm->inputs ) {
-                print STDERR Dumper($finput) if $Debug;
+                print STDERR "Dumping input from form: " . Dumper($finput) if $Debug;
                 if( exists $inputs->{type} ) {
                     print STDERR "Comparing type ($inputs->{type} <=?> " . $finput->type . ")\n" if $Debug;
                     next FORM_INPUT unless $finput->type eq $inputs->{type};
@@ -445,8 +710,9 @@ sub _get_form {
                 $input_match = 1;
                 last FORM_INPUT if $input_match;
             }
-        }
 
+            next FORMS unless $input_match;
+        }
 	$form = $frm;
 	last
     }
@@ -536,6 +802,23 @@ Example:
 
   $mp->create_organization( org => 'New Sub-Org' );
 
+=head2 set_org_mail_server( %parms )
+
+Sets the mail server for an organization, as well as load-balancing
+and connection limit settings
+
+  $mp->set_org_mail_server( server1 => 'box.hosting.tld',
+                            weight1 => 100,
+                            maxcon1 => 500,
+
+                            failover1  => 'backup.hosting.tld',
+                            fo_weight1 => 100,
+                            fo_maxcon1 => 300,
+                           );
+
+You may specify as many serverN, pconnN and limitN as you wish (but
+Postini may have internal limits).
+
 =head2 delete_organization ( $organization_name )
 
 Deletes an organization. All domains must be deleted from the
@@ -545,11 +828,15 @@ Example:
 
   $mp->delete_organization( org => 'Old Sub-Org' );
 
+=head2 org_from_domain ( $domain )
+
+Returns the organization id that is the immediate parent of the given domain.
+
 =head2 list_users ( %criteria )
 
 Returns a hashref in the form of 'username => user data' for all users
-that match the given criteria. Currently only 'user' and 'domain'
-criteria are supported.
+that match the given criteria. Currently 'user', 'domain', 'org', and
+'orgid' criteria are supported.
 
 Example:
 
