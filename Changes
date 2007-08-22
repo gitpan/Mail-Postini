@@ -1,5 +1,25 @@
 Revision history for Perl extension Mail::Postini.
 
+Release 0.12:
+----------------------------
+revision 1.7
+date: 2007/08/22 20:55:21;  author: scott;  state: Exp;  lines: +75 -2
+- added reset_user_password() method
+
+Release 0.11:
+----------------------------
+revision 1.6
+date: 2007/08/22 17:25:19;  author: scott;  state: Exp;  lines: +61 -25
+- add tracing option
+- fix set_org_mail_config() to use form parser
+- fix some doc typos
+
+Release 0.10:
+----------------------------
+revision 1.5
+date: 2007/08/15 04:32:43;  author: scott;  state: Exp;  lines: +16 -4
+- use orgid if available for add_domain()
+
 Release 0.9:
 ----------------------------
 revision 1.4

@@ -4,8 +4,8 @@ use 5.008001;
 use strict;
 use warnings;
 
-our $VERSION = '0.11';
-our $CVSID   = '$Id: Postini.pm,v 1.6 2007/08/22 17:25:19 scott Exp $';
+our $VERSION = '0.12';
+our $CVSID   = '$Id: Postini.pm,v 1.7 2007/08/22 20:55:21 scott Exp $';
 our $Debug   = 0;
 our $Trace   = 0;
 
@@ -573,6 +573,57 @@ sub delete_user {
     return $self->_do_command('deleteuser', @_);
 }
 
+sub reset_user_password {
+    my $self = shift;
+    my %args = @_;
+
+    unless( $args{user} ) {
+        $self->errors("user parameter required for reset_user_password()");
+        return;
+    }
+
+    my %data = $self->get_user_data( $args{user} )
+      or do {
+          $self->errors("Error fetching user list from '$args{user}'");
+          return;
+      };
+
+    my $user_id = $data{$args{user}}->{user_id}
+      or do {
+          $self->errors("Could not fetch user_id from '$args{user}'");
+          return;
+      };
+
+    my $req = HTTP::Request->new( GET => qq!$app_serv{$self}/exec/admin_users?targetorgid=&targetuserid=$user_id&action=display_Password! );
+    my $res = $ua{$self}->request($req);
+
+    my $form = $self->_get_form($res, qr(\badmin_users\b))
+      or do {
+          carp "Form error: " . join(', ', $self->errors());
+          return;
+      };
+
+    if( $args{password} ) {
+        $form->value( resetchoice => 2 );
+        $form->value( notify  => 1 ) if $args{notify};
+    }
+
+    else {
+        $form->value( resetchoice => 1 );
+    }
+    $form->value( action => 'modifyPassword' );
+
+    $res = $ua{$self}->request( $form->click('save') );
+
+    unless( $res->code == 302 ) {
+        $self->errors("Failure: " . $res->code . ": " . $res->message);
+        $self->err_pages($res);
+        return;
+    }
+
+    return 1;
+}
+
 sub _do_command {
     my $self = shift;
     my $cmd  = shift;
@@ -896,6 +947,28 @@ Deletes an email address from a Postini configuration.
 Example:
 
   $mp->delete_user( 'joe@somedomain.tld' );
+
+=head2 reset_user_password ( %args )
+
+Resets a user's password. Arguments:
+
+=over 4
+
+=item B<user>
+
+The email address to change passwords for
+
+=item B<password>
+
+If specified, we'll use this password for the new password. Otherwise
+a new password will be generated and sent to the user.
+
+=item B<notify>
+
+If specified, email the user their new password (this only applies if
+a password is supplied).
+
+=back
 
 =head2 errors ()
 
