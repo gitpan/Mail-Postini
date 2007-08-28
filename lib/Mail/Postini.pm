@@ -4,8 +4,8 @@ use 5.008001;
 use strict;
 use warnings;
 
-our $VERSION = '0.12';
-our $CVSID   = '$Id: Postini.pm,v 1.7 2007/08/22 20:55:21 scott Exp $';
+our $VERSION = '0.13';
+our $CVSID   = '$Id: Postini.pm,v 1.8 2007/08/28 22:00:35 scott Exp $';
 our $Debug   = 0;
 our $Trace   = 0;
 
@@ -107,6 +107,8 @@ sub connect {
 
     ($app_serv{$self}) = $sa_page =~ m!^(https?://[^/]+)/!;
 
+    ## FIXME: this is assuming that our orgname option will always be
+    ## FIXME: in the drop-down. Not all orgs will fit in this list!
     my($orgid) = $res->content =~ /^\s*<option value="(\d+)"(?: selected)?>$orgname{$self}$/im;
     ($orgid{$self}) ||= $orgid;
 
@@ -389,11 +391,13 @@ sub get_orgid {
         return $orgid{$self};
     }
 
-    my $req = HTTP::Request->new( GET => qq!$app_serv{$self}/exec/admin_list?type=orgs! );
+    my $req = HTTP::Request->new( GET => qq!$app_serv{$self}/exec/admin_list?type=orgs&orgtagqs=$args{name}! );
     my $res = $ua{$self}->request($req);
 
-    my($orgid) = $res->content =~ /^\s*<option value="(\d+)"(?: selected)?>$args{name}$/im;
+    my ($chunk) = $res->content =~ m#<!-- START ORG ROW -->\n(.+)\n<!-- END ORG ROW -->#s;
+    return unless $chunk;
 
+    my ($orgid) = $chunk =~ m!<a href="/exec/admin_orgs\?.+?&targetorgid=(\d+)"><b>$args{name}</b></a>!;
     return( $orgid ? $orgid : undef );
 }
 

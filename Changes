@@ -1,5 +1,12 @@
 Revision history for Perl extension Mail::Postini.
 
+Release 0.13:
+----------------------------
+revision 1.8
+date: 2007/08/28 22:00:35;  author: scott;  state: Exp;  lines: +8 -4
+- fix how we find the orgid (Postini paging kicks in after 25 orgs, so
+  we have to do a search instead)
+
 Release 0.12:
 ----------------------------
 revision 1.7
