@@ -4,8 +4,8 @@ use 5.008001;
 use strict;
 use warnings;
 
-our $VERSION = '0.13';
-our $CVSID   = '$Id: Postini.pm,v 1.8 2007/08/28 22:00:35 scott Exp $';
+our $VERSION = '0.14';
+our $CVSID   = '$Id: Postini.pm,v 1.9 2007/08/29 17:00:42 scott Exp $';
 our $Debug   = 0;
 our $Trace   = 0;
 
@@ -107,10 +107,7 @@ sub connect {
 
     ($app_serv{$self}) = $sa_page =~ m!^(https?://[^/]+)/!;
 
-    ## FIXME: this is assuming that our orgname option will always be
-    ## FIXME: in the drop-down. Not all orgs will fit in this list!
-    my($orgid) = $res->content =~ /^\s*<option value="(\d+)"(?: selected)?>$orgname{$self}$/im;
-    ($orgid{$self}) ||= $orgid;
+    $orgid{$self} ||= $self->get_orgid( name => $orgname{$self} );
 
     return 1;
 }
@@ -121,7 +118,7 @@ sub create_organization {
 
     my $parentorgid;
     unless( $parentorgid = $args{parentorgid} ) {
-        $parentorgid = $self->get_orgid($args{parentorg})
+        $parentorgid = $self->get_orgid(name => $args{parentorg})
           if $args{parentorg};
         $parentorgid ||= $orgid{$self};  ## top level org
     }
@@ -200,7 +197,7 @@ sub set_org_mail_server {
             return;
         }
 
-        $args{orgid} = $self->get_orgid($args{org})
+        $args{orgid} = $self->get_orgid(name => $args{org})
           or do {
               $self->errors("Failure: Could not get orgid for '$args{org}' (misspelled org name, or Postini down?)");
               return;
@@ -291,7 +288,7 @@ sub get_org_mail_server {
             return;
         }
 
-        $args{orgid} = $self->get_orgid($args{org})
+        $args{orgid} = $self->get_orgid(name => $args{org})
           or do {
               $self->errors("Failure: Could not get orgid for '$args{org}' (misspelled org name or Postini down?)");
               return;
@@ -388,7 +385,7 @@ sub get_orgid {
     my %args = @_;
 
     if( $args{name} eq $orgname{$self} ) {
-        return $orgid{$self};
+        return $orgid{$self} if $orgid{$self};  ## for bootstrapping
     }
 
     my $req = HTTP::Request->new( GET => qq!$app_serv{$self}/exec/admin_list?type=orgs&orgtagqs=$args{name}! );

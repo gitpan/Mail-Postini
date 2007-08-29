@@ -1,5 +1,11 @@
 Revision history for Perl extension Mail::Postini.
 
+Release 0.14:
+----------------------------
+revision 1.9
+date: 2007/08/29 17:00:42;  author: scott;  state: Exp;  lines: +7 -10
+- fixes for bootstrapping the main org when it's been pushed off the drop-down
+
 Release 0.13:
 ----------------------------
 revision 1.8
