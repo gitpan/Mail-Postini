@@ -4,8 +4,8 @@ use 5.008001;
 use strict;
 use warnings;
 
-our $VERSION = '0.14';
-our $CVSID   = '$Id: Postini.pm,v 1.9 2007/08/29 17:00:42 scott Exp $';
+our $VERSION = '0.15';
+our $CVSID   = '$Id: Postini.pm,v 1.10 2007/09/17 22:52:15 scott Exp $';
 our $Debug   = 0;
 our $Trace   = 0;
 
@@ -185,6 +185,122 @@ sub create_organization {
 
     print STDERR "Successful organization creation ($new_org)\n" if $Trace;
     return ( $new_org ? $new_org : undef );
+}
+
+sub list_organizations {
+    my $self = shift;
+    my %args = @_;
+
+    my $orgid = $args{orgid} || $self->get_orgid( name => $orgid{$self} );
+
+    my $req = HTTP::Request->new( GET => qq!$app_serv{$self}/exec/admin_listorgs_download?sortkeys=orgtag%3Ah&type_of_user=all&childorgs=1&type_of_encrypted_user=ext_encrypt_any&aliases=0&targetorgid=${orgid}&type=orgsets! );
+    my $res = $ua{$self}->request($req);
+
+    my @keys = ();
+    my %orgs = ();
+
+  LINES: for my $line ( split(/\n/, $res->content) ) {
+
+        ## find the keys
+        if( $line =~ /^\#/ ) {
+            next unless $line =~ /\borgname\b/;
+            next if @keys;
+
+            $line =~ s/^#\s*//;
+            @keys = split(/,/, $line);
+            next;
+        }
+
+        next LINES unless @keys;
+
+        ## FIXME: here skip all orgs except the one we're looking for...
+        ## next unless $line =~ /^$args{orgname}/;  ## or something like that.
+
+        my @fields = ();
+        my $state = 0;
+        CHUNK: for my $chunk ( split(/,/, $line) ) {
+
+            if( $state == 1 ) {
+                if( $chunk =~ s/"$// ) {
+                    $state = 0;
+                }
+
+                $fields[$#fields] .= ',' . $chunk;
+                next CHUNK;
+            }
+
+            if( $chunk =~ s/^"// ) {
+                $state = 1;
+            }
+
+            push @fields, $chunk;
+        }
+
+        my %acct = ();
+        @acct{@keys} = @fields;
+        $orgs{$acct{$keys[0]}} = \%acct;
+    }
+
+    return \%orgs;
+
+}
+
+sub set_org_data {
+    my $self = shift;
+    my %args = @_;
+
+    unless( $args{orgid} ) {
+        unless( $args{org} ) {
+            $self->errors("Failure: orgid or og parameter required for set_org_data()");
+            return;
+        }
+
+        $args{orgid} = $self->get_orgid( name => $args{orgid})
+          or do {
+              $self->errors("Failure: Could not get orgid for '$args{org}' (misspelled org name, or Postini down?)");
+              return;
+          };
+    }
+
+    my $orgid = $args{orgid};
+
+    if( $args{section} eq 'GeneralSettings' ) {
+        my $req = HTTP::Request->new( GET => qq!$app_serv{$self}/exec/admin_orgs?targetorgid=${orgid}&action=display_GeneralSettings! );
+        my $res = $ua{$self}->request($req);
+
+        my $form = $self->_get_form($res, qr(admin_orgs\?targetorgid=${orgid}), 
+                                    { type => 'text', name => 'setconf-name' } )
+          or do {
+              carp "Form error: " . join(", ", $self->errors);
+              return;
+          };
+
+        $form->value( action => "modifyGeneralSettings" );
+
+        $form->value( "setconf-name"            => $args{name} )            if $args{name};
+        $form->value( "setconf-orgtag"          => $args{orgtag} )          if $args{orgtag};
+        $form->value( "setconf-parent"          => $args{parent} )          if $args{parent};
+        $form->value( "setconf-support_contact" => $args{support_contact} ) if $args{support_contact};
+        $form->value( "setconf-api_secret"      => $args{api_secret} )      if $args{api_secret};
+        $form->value( "setconf-tight_postini"   => $args{tight_postini} )   if $args{tight_postini};
+        $form->value( "setconf-default_user"    => $args{default_user} )    if $args{default_user};
+        $form->value( "setconf-smartcreate"     => $args{smartcreate} )     if $args{smartcreate};
+        $form->value( "setconf-quar_links"      => $args{quar_links} )      if $args{quar_links};
+        $form->value( "setconf-timezone"        => $args{timezone} )        if $args{timezone};
+        $form->value( "lang"                    => $args{lang} )            if $args{lang};
+        $form->value( "encoding"                => $args{encoding} )        if $args{encoding};
+        $form->value( "cascade"                 => $args{cascade} )         if $args{cascade};
+
+        $res = $ua{$self}->request( $form->click('save') );
+
+        unless( $res->is_redirect ) {
+            $self->errors("Failure: " . $res->code . ": " . $res->message);
+            $self->err_pages($res);
+            return;
+        }
+    }
+
+    return 1;
 }
 
 sub set_org_mail_server {
@@ -853,6 +969,63 @@ in the constructor by I<orgname>.
 Example:
 
   $mp->create_organization( org => 'New Sub-Org' );
+
+=head2 list_organizations
+
+Returns a hashref of organizations in this form:
+
+  { orgid => <orgdata> }
+
+where orgdata is a hashref in this form:
+
+  { key => value }
+
+This structure may vary from time to time, based on what is returned
+from Postini's "Download Orgs/Settings" link. You may use something
+like B<Data::Dumper> to discover the keys and values returned in this
+method.
+
+=head2 set_org_data( %parms )
+
+Sets organization data. Currently, only the General Settings are supported.
+
+GeneralSettings options:
+
+Arguments (and values, if applicable):
+
+=over 4
+
+=item B<section>
+
+GeneralSettings
+
+=item B<name>
+
+=item B<orgtag>
+
+=item B<parent>
+
+=item B<support_contact>
+
+=item B<api_secret>
+
+=item B<tight_postini>
+
+=item B<default_user>
+
+=item B<smartcreate>
+
+=item B<quar_links>
+
+=item B<timezone>
+
+=item B<lang>
+
+=item B<encoding>
+
+=item B<cascade>
+
+=back
 
 =head2 set_org_mail_server( %parms )
 

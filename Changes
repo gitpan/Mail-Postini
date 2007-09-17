@@ -1,5 +1,11 @@
 Revision history for Perl extension Mail::Postini.
 
+Release 0.15:
+----------------------------
+revision 1.10
+date: 2007/09/17 22:52:15;  author: scott;  state: Exp;  lines: +175 -2
+- list_organizations() and set_org_data() methods
+
 Release 0.14:
 ----------------------------
 revision 1.9
