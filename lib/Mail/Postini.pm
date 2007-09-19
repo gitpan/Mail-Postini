@@ -4,8 +4,8 @@ use 5.008001;
 use strict;
 use warnings;
 
-our $VERSION = '0.15';
-our $CVSID   = '$Id: Postini.pm,v 1.10 2007/09/17 22:52:15 scott Exp $';
+our $VERSION = '0.16';
+our $CVSID   = '$Id: Postini.pm,v 1.11 2007/09/19 22:19:06 scott Exp $';
 our $Debug   = 0;
 our $Trace   = 0;
 
@@ -118,7 +118,7 @@ sub create_organization {
 
     my $parentorgid;
     unless( $parentorgid = $args{parentorgid} ) {
-        $parentorgid = $self->get_orgid(name => $args{parentorg})
+        $parentorgid = $self->get_orgid( name => $args{parentorg} )
           if $args{parentorg};
         $parentorgid ||= $orgid{$self};  ## top level org
     }
@@ -313,7 +313,7 @@ sub set_org_mail_server {
             return;
         }
 
-        $args{orgid} = $self->get_orgid(name => $args{org})
+        $args{orgid} = $self->get_orgid( name => $args{org} )
           or do {
               $self->errors("Failure: Could not get orgid for '$args{org}' (misspelled org name, or Postini down?)");
               return;
@@ -404,7 +404,7 @@ sub get_org_mail_server {
             return;
         }
 
-        $args{orgid} = $self->get_orgid(name => $args{org})
+        $args{orgid} = $self->get_orgid( name => $args{org} )
           or do {
               $self->errors("Failure: Could not get orgid for '$args{org}' (misspelled org name or Postini down?)");
               return;
@@ -618,7 +618,7 @@ sub list_users {
             return;
         }
 
-        last GET_ORGID if $args{orgid} = $self->get_orgid($args{org});
+        last GET_ORGID if $args{orgid} = $self->get_orgid( name => $args{org} );
 
         $self->errors("Failure: Could not get orgid for '$args{org}' (misspelled org name or Postini down?)");
         return;
@@ -675,6 +675,65 @@ sub list_users {
         my %acct = ();
         @acct{@keys} = @fields;
         $users{$acct{$keys[0]}} = \%acct;
+    }
+
+    return \%users;
+}
+
+## this requires much more parsing than list_users
+sub list_aliases {
+    my $self = shift;
+    my %args = @_;
+
+  GET_ORGID: {
+        last GET_ORGID if $args{orgid};
+
+        ## no org given...
+        unless( $args{org} ) {
+
+            ## but we have a domain we can search on
+            if( $args{domain} ) {
+                if( $args{orgid} = $self->org_from_domain($args{domain}) ) {
+                    last GET_ORGID;
+                }
+
+                ## bite the bullet and suck up the memory...
+                $args{orgid} = $orgid{$self};
+                last GET_ORGID;
+            }
+
+            $self->errors("Failure: domain, orgid, or org parameter required for list_users()");
+            return;
+        }
+
+        last GET_ORGID if $args{orgid} = $self->get_orgid( name => $args{org} );
+
+        $self->errors("Failure: Could not get orgid for '$args{org}' (misspelled org name or Postini down?)");
+        return;
+    }
+
+    my $qs = qq!$app_serv{$self}/exec/admin_list?type_of_user=all&type=usersets&childorgs=0&addressqs=&orgtagqs=&primaryqs=.*&aliases=1&childorgs=1&Search=Search!;
+    $qs .= "&addressqs=$args{domain}%24" if $args{domain};
+
+    my $req = HTTP::Request->new( GET => $qs );
+    my $res = $ua{$self}->request($req);
+
+    my %users = ();
+
+    my ($chunk) = $res->content =~ m#<!-- START USER SETTINGS LISTING -->\n(.+)\n<!-- END USER SETTINGS LISTING -->#s;
+    return unless $chunk;
+
+    for my $record ( split(/<!-- START USER SETTINGS ROW -->/, $chunk ) ) {
+        next if $record =~ /alt="Bulk"/;
+
+        my($alias, $user) = $record =~ m!<tr.+?><b>([^<]+)</b></a>.*?</td>.*?</td>.*?<a href="/exec/admin_users.+?">([^<]+)</a>!s
+          or next;
+
+        unless( $users{$user} ) {
+            $users{$user} = [];
+        }
+
+        push @{$users{$user}}, $alias;
     }
 
     return \%users;
@@ -1067,6 +1126,21 @@ Example:
 
   ## retrieve all users for this domain
   my $users = $mp->list_users( domain => 'saltpatio.com' );
+
+=head2 list_aliases ( %criteria )
+
+Returns a hashref of users and aliases in the form:
+
+ { user1 => [ alias1, alias2 ],
+   user2 => [ alias1, ... ],
+   ... }
+
+This method takes the same criteria as list_users().
+
+Example:
+
+  my $aliases = $mp->list_aliases( domain => 'saltpatio.com' );
+  print "Aliases for joe: " . join("\n", @{$aliases->{'joe@saltpatio.com'}}) . "\n";
 
 =head2 get_user_data ( $username )
 
