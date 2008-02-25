@@ -1,5 +1,11 @@
 Revision history for Perl extension Mail::Postini.
 
+Release 0.17:
+----------------------------
+revision 1.12
+date: 2008/02/25 18:26:49;  author: scott;  state: Exp;  lines: +3 -3
+- fix fetch org list by orgname (patch from Art Zemon)
+
 Release 0.16:
 ----------------------------
 revision 1.11

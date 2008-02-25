@@ -4,8 +4,8 @@ use 5.008001;
 use strict;
 use warnings;
 
-our $VERSION = '0.16';
-our $CVSID   = '$Id: Postini.pm,v 1.11 2007/09/19 22:19:06 scott Exp $';
+our $VERSION = '0.17';
+our $CVSID   = '$Id: Postini.pm,v 1.12 2008/02/25 18:26:49 scott Exp $';
 our $Debug   = 0;
 our $Trace   = 0;
 
@@ -191,7 +191,7 @@ sub list_organizations {
     my $self = shift;
     my %args = @_;
 
-    my $orgid = $args{orgid} || $self->get_orgid( name => $orgid{$self} );
+    my $orgid = $args{orgid} || $self->get_orgid( name => $orgname{$self} );
 
     my $req = HTTP::Request->new( GET => qq!$app_serv{$self}/exec/admin_listorgs_download?sortkeys=orgtag%3Ah&type_of_user=all&childorgs=1&type_of_encrypted_user=ext_encrypt_any&aliases=0&targetorgid=${orgid}&type=orgsets! );
     my $res = $ua{$self}->request($req);
