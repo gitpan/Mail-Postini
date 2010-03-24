@@ -1,16 +1,16 @@
 --- #YAML:1.0
 name:                Mail-Postini
-version:             0.17
+version:             0.18
 abstract:            Perl extension for talking to Postini
 license:             ~
-generated_by:        ExtUtils::MakeMaker version 6.36
+author:              
+    - Scott Wiersdorf <scott@perlcode.org>
+generated_by:        ExtUtils::MakeMaker version 6.42
 distribution_type:   module
 requires:     
     Digest::SHA1:                  2.1
     LWP::UserAgent:                2
     URI::Escape:                   3.2
 meta-spec:
-    url:     http://module-build.sourceforge.net/META-spec-v1.2.html
-    version: 1.2
-author:
-    - Scott Wiersdorf <scott@perlcode.org>
+    url:     http://module-build.sourceforge.net/META-spec-v1.3.html
+    version: 1.3

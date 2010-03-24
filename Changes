@@ -1,5 +1,15 @@
 Revision history for Perl extension Mail::Postini.
 
+Release 0.18:
+----------------------------
+revision 1.13
+date: 2010/03/24 14:28:44;  author: scott;  state: Exp;  lines: +32 -4
+- proxy support
+- fix for "String authentication failed" error when unescaped
+  characters during auth (patch from Robert Norris)
+- special maintenance note: Scott can't maintain this module any
+  longer (no more access to a Postini account). Any takers?
+
 Release 0.17:
 ----------------------------
 revision 1.12

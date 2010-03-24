@@ -4,8 +4,8 @@ use 5.008001;
 use strict;
 use warnings;
 
-our $VERSION = '0.17';
-our $CVSID   = '$Id: Postini.pm,v 1.12 2008/02/25 18:26:49 scott Exp $';
+our $VERSION = '0.18';
+our $CVSID   = '$Id: Postini.pm,v 1.13 2010/03/24 14:28:44 scott Exp $';
 our $Debug   = 0;
 our $Trace   = 0;
 
@@ -28,6 +28,7 @@ my %orgid     = ();
 my %orgname   = ();
 my %ua        = ();
 my %agent     = ();
+my %proxy     = ();
 my %errors    = ();
 my %err_pages = ();
 
@@ -44,6 +45,7 @@ sub new {
     $args{orgid}    ||= '';
     $args{orgname}  ||= '';
     $args{agent}    ||= 'perl/Mail-Postini $VERSION';
+    $args{proxy}    ||= '';
 
     $postini   {$self} = $args{postini};
     $app_serv  {$self} = '';
@@ -53,6 +55,7 @@ sub new {
     $orgid     {$self} = $args{orgid};
     $orgname   {$self} = $args{orgname};
     $agent     {$self} = $args{agent};
+    $proxy     {$self} = $args{proxy};
     $errors    {$self} = [];
     $err_pages {$self} = [];
 
@@ -71,9 +74,11 @@ sub connect {
     exists $args{orgid}    and $orgid    {$self} = $args{orgid};
     exists $args{orgname}  and $orgname  {$self} = $args{orgname};
     exists $args{agent}    and $agent    {$self} = $args{agent};
+    exists $args{proxy}    and $proxy    {$self} = $args{proxy};
 
     $ua{$self} = LWP::UserAgent->new;
     $ua{$self}->agent($agent{$self});
+    $ua{$self}->proxy(['http','https'], $proxy{$self}) if $proxy{$self};
     $ua{$self}->cookie_jar({});
 
     my $uname = uri_escape($username{$self});
@@ -809,7 +814,7 @@ sub _do_command {
     my $radd = chr(rand(26) + 0x41) . chr(rand(26) + 0x41) . 
       chr(rand(26) + 0x41) . chr(rand(26) + 0x41) . $username{$self};
 
-    my $sig = sha1_base64( $radd . $secret{$self} ) . $radd;
+    my $sig = uri_escape(sha1_base64( $radd . $secret{$self} ) . $radd);
 
     $addr = uri_escape($addr);
 
@@ -822,7 +827,9 @@ sub _do_command {
     my $auth = qq!$app_serv{$self}/exec/remotecmd?auth=${sig}&cmd=${cmd}%20${addr}! . ( $args ? '&' . $args : '' );
     print STDERR "Sending command: $auth\n" if $Debug;
     my $req = HTTP::Request->new( GET => $auth );
-    my $res = LWP::UserAgent->new->request($req);
+    my $ua  = LWP::UserAgent->new;
+    $ua->proxy('http', $proxy{$self}) if $proxy{$self};
+    my $res = $ua->request($req);
 
     unless( $res->content =~ /^1\s/ ) {
         $self->errors("Failure: " . $res->content);
@@ -877,6 +884,7 @@ sub DESTROY {
     delete $orgname   {$self};
     delete $ua        {$self};
     delete $agent     {$self};
+    delete $proxy     {$self};
     delete $errors    {$self};
     delete $err_pages {$self};
 
@@ -1009,6 +1017,17 @@ Example:
                                password => '3dk2j3jd8fk3kfuasdf',
                                secret   => 'this is our secret postini key',
                                orgname  => 'Our Customers' );
+
+Proxy support is new in 0.18:
+
+  my $mp = new Mail::Postini ( postini  => 'https://login.postini.com/exec/login',
+                               username => 'some@one.tld',
+                               password => '3dk2j3jd8fk3kfuasdf',
+                               secret   => 'this is our secret postini key',
+                               orgname  => 'Our Customers',
+                               proxy    => 'example.com' );
+
+This sets up an http/https proxy through example.com.
 
 =head2 connect ()
 
@@ -1273,6 +1292,15 @@ Clears the object's internal error page list.
 
 B<Mail::Foundry> (some page parsing routines were done here first).
 B<HTTP::Response>
+
+=head1 MAINTENANCE
+
+As of B<Mail::Postini> 0.18, Scott Wiersdorf no longer has access to a
+working Postini account--he is now flying blind when applying patches
+and working on new features (no way to test them). If you would like
+to receive praise and support one of your favorite modules by taking
+on ownership of B<Mail::Postini>, please contact Scott at the address
+below.
 
 =head1 AUTHOR
 
